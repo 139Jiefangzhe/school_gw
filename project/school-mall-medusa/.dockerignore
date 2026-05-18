@@ -1,0 +1,12 @@
+node_modules
+.git
+.env
+.env.*
+!.env.example
+!.env.server.example
+dist
+coverage
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+school_shop.zip
