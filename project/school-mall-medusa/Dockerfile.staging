@@ -9,6 +9,7 @@ RUN npm ci --omit=dev --legacy-peer-deps --no-audit --no-fund --registry=https:/
 
 COPY .medusa ./.medusa
 COPY .medusa/server/src/medusa-config.js ./medusa-config.js
+COPY .medusa/server/public ./public
 COPY src ./src
 
 EXPOSE 9000

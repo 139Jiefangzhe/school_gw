@@ -1,32 +1,28 @@
 import {
-  createInventoryLevelsWorkflow,
   createProductsWorkflow,
   createRegionsWorkflow,
   createSalesChannelsWorkflow,
   createShippingOptionsWorkflow,
   createStockLocationsWorkflow,
   createProductCategoriesWorkflow,
-  createInventoryItemsWorkflow,
   createShippingProfilesWorkflow,
   updateStoresWorkflow,
-  createFulfillmentSetWorkflow,
+  createLocationFulfillmentSetWorkflow,
   createServiceZonesWorkflow,
   linkSalesChannelsToApiKeyWorkflow,
   createApiKeysWorkflow,
   createDefaultsWorkflow,
-  createCustomerAccountWorkflow,
 } from "@medusajs/medusa/core-flows";
-import { ExecArgs } from "@medusajs/framework/types";
+import type { ExecArgs, Logger } from "@medusajs/framework/types";
 import {
   ContainerRegistrationKeys,
   Modules,
   ProductStatus,
-  GEO_ZONE_TYPES,
 } from "@medusajs/framework/utils";
-import { Logger } from "@medusajs/framework/types";
 
 const DEFAULT_SCHOOL_ADMIN_EMAIL = "admin@school-mall.com";
 const DEFAULT_SCHOOL_ADMIN_PASSWORD = "school-mall-2024";
+const MANUAL_FULFILLMENT_PROVIDER_ID = "manual_manual";
 
 /**
  * Seed demo data for School Mall
@@ -36,7 +32,6 @@ const DEFAULT_SCHOOL_ADMIN_PASSWORD = "school-mall-2024";
 export default async function seedDemoData({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER) as Logger;
   const remoteLink = container.resolve(ContainerRegistrationKeys.REMOTE_LINK);
-  const query = container.resolve(ContainerRegistrationKeys.QUERY);
 
   logger.info("Seeding School Mall demo data...");
 
@@ -82,7 +77,7 @@ export default async function seedDemoData({ container }: ExecArgs) {
     container
   ).run({
     input: {
-      sales_channels_data: [
+      salesChannelsData: [
         {
           name: "微信小程序商城",
           description: "School Mall WeChat Mini Program sales channel",
@@ -118,7 +113,7 @@ export default async function seedDemoData({ container }: ExecArgs) {
   const stockLocation = stockLocationResult[0];
   logger.info(`Stock location created: ${stockLocation.name} (${stockLocation.id})`);
 
-  // ─── Step 4: Link Sales Channel to Stock Location ───
+  // ─── Step 4: Link Sales Channel and Fulfillment Provider to Stock Location ───
   logger.info("Linking sales channel to stock location...");
   await remoteLink.create({
     [Modules.SALES_CHANNEL]: {
@@ -129,41 +124,57 @@ export default async function seedDemoData({ container }: ExecArgs) {
     },
   });
 
-  // ─── Step 5: Create Fulfillment Set & Service Zone ───
-  logger.info("Creating fulfillment set...");
-  const { result: fulfillmentSetResult } = await createFulfillmentSetWorkflow(
-    container
-  ).run({
-    input: {
-      data: {
-        name: "校园配送",
-        type: "school-delivery",
-        service_zones: [
-          {
-            name: "校园服务区",
-            geo_zones: [
-              {
-                type: GEO_ZONE_TYPES.COUNTRY,
-                country_code: "cn",
-              },
-            ],
-          },
-        ],
-      },
-    },
-  });
-  const fulfillmentSet = fulfillmentSetResult;
-  logger.info(`Fulfillment set created: ${fulfillmentSet.name} (${fulfillmentSet.id})`);
-
-  // Link fulfillment set to stock location
+  logger.info("Linking manual fulfillment provider to stock location...");
   await remoteLink.create({
     [Modules.STOCK_LOCATION]: {
       stock_location_id: stockLocation.id,
     },
     [Modules.FULFILLMENT]: {
-      fulfillment_set_id: fulfillmentSet.id,
+      fulfillment_provider_id: MANUAL_FULFILLMENT_PROVIDER_ID,
     },
   });
+
+  // ─── Step 5: Create Fulfillment Set & Service Zone ───
+  logger.info("Creating fulfillment set...");
+  await createLocationFulfillmentSetWorkflow(container).run({
+    input: {
+      location_id: stockLocation.id,
+      fulfillment_set_data: {
+        name: "校园配送",
+        type: "school-delivery",
+      },
+    },
+  });
+  const fulfillmentModuleService = container.resolve(Modules.FULFILLMENT);
+  const [fulfillmentSet] = await fulfillmentModuleService.listFulfillmentSets(
+    { name: "校园配送" },
+    { relations: ["service_zones"] }
+  );
+  if (!fulfillmentSet) {
+    throw new Error("Failed to create fulfillment set for stock location");
+  }
+  logger.info(`Fulfillment set created: ${fulfillmentSet.name} (${fulfillmentSet.id})`);
+
+  const { result: serviceZoneResult } = await createServiceZonesWorkflow(
+    container
+  ).run({
+    input: {
+      data: [
+        {
+          fulfillment_set_id: fulfillmentSet.id,
+          name: "校园服务区",
+          geo_zones: [
+            {
+              type: "country",
+              country_code: "cn",
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const serviceZone = serviceZoneResult[0];
+  logger.info(`Service zone created: ${serviceZone.name} (${serviceZone.id})`);
 
   // ─── Step 6: Create Shipping Profiles ───
   logger.info("Creating shipping profiles...");
@@ -203,9 +214,9 @@ export default async function seedDemoData({ container }: ExecArgs) {
       {
         name: "快递物流",
         price_type: "flat",
-        service_zone_id: fulfillmentSet.service_zones[0].id,
+        service_zone_id: serviceZone.id,
         shipping_profile_id: shippingProfile.id,
-        provider_id: "manual_manual",
+        provider_id: MANUAL_FULFILLMENT_PROVIDER_ID,
         type: {
           label: "快递物流",
           description: "通过第三方快递配送至指定地址",
@@ -223,9 +234,9 @@ export default async function seedDemoData({ container }: ExecArgs) {
       {
         name: "自提点取货",
         price_type: "flat",
-        service_zone_id: fulfillmentSet.service_zones[0].id,
+        service_zone_id: serviceZone.id,
         shipping_profile_id: shippingProfile.id,
-        provider_id: "manual_manual",
+        provider_id: MANUAL_FULFILLMENT_PROVIDER_ID,
         type: {
           label: "自提点取货",
           description: "到校园指定自提点领取商品",
@@ -242,9 +253,9 @@ export default async function seedDemoData({ container }: ExecArgs) {
       {
         name: "送货上门",
         price_type: "flat",
-        service_zone_id: fulfillmentSet.service_zones[0].id,
+        service_zone_id: serviceZone.id,
         shipping_profile_id: shippingProfile.id,
-        provider_id: "manual_manual",
+        provider_id: MANUAL_FULFILLMENT_PROVIDER_ID,
         type: {
           label: "送货上门",
           description: "配送至宿舍或教学楼",
@@ -285,6 +296,12 @@ export default async function seedDemoData({ container }: ExecArgs) {
 
   // ─── Step 9: Create Products ───
   logger.info("Creating sample products...");
+  const stockQuantitiesBySku: Record<string, number> = {
+    "NB-SET-STD-001": 100,
+    "NB-SET-PLUS-001": 50,
+    "PEN-GEL-MIX-001": 200,
+    "PEN-GEL-BLK-001": 150,
+  };
 
   // Product 1: Notebook
   const { result: product1Result } = await createProductsWorkflow(container).run({
@@ -296,12 +313,13 @@ export default async function seedDemoData({ container }: ExecArgs) {
           description: "A5尺寸优质纸张笔记本，包含5本不同颜色封面，适合课堂笔记和日常记录。",
           subtitle: "5本装",
           status: ProductStatus.PUBLISHED,
-          categories: [{ id: category.id }],
+          category_ids: [category.id],
           sales_channels: [{ id: salesChannel.id }],
+          shipping_profile_id: shippingProfile.id,
           images: [
             {
               url: "https://images.unsplash.com/photo-1531346878377-a5be20888e57?w=800",
-              alt: "精品笔记本套装",
+              metadata: { alt: "精品笔记本套装" },
             },
           ],
           options: [
@@ -316,18 +334,16 @@ export default async function seedDemoData({ container }: ExecArgs) {
               sku: "NB-SET-STD-001",
               allow_backorder: false,
               manage_inventory: true,
-              inventory_quantity: 100,
               prices: [{ currency_code: "cny", amount: 2990 }], // 29.90 CNY
-              options: [{ option: "规格", value: "标准版" }],
+              options: { 规格: "标准版" },
             },
             {
               title: "加厚版",
               sku: "NB-SET-PLUS-001",
               allow_backorder: false,
               manage_inventory: true,
-              inventory_quantity: 50,
               prices: [{ currency_code: "cny", amount: 3990 }], // 39.90 CNY
-              options: [{ option: "规格", value: "加厚版" }],
+              options: { 规格: "加厚版" },
             },
           ],
           weight: 500,
@@ -353,12 +369,13 @@ export default async function seedDemoData({ container }: ExecArgs) {
           description: "日本进口0.5mm中性笔，书写流畅不洇墨，包含黑、蓝、红三色各2支。",
           subtitle: "6支装",
           status: ProductStatus.PUBLISHED,
-          categories: [{ id: category.id }],
+          category_ids: [category.id],
           sales_channels: [{ id: salesChannel.id }],
+          shipping_profile_id: shippingProfile.id,
           images: [
             {
               url: "https://images.unsplash.com/photo-1585336261022-680e295ce3fe?w=800",
-              alt: "进口中性笔套装",
+              metadata: { alt: "进口中性笔套装" },
             },
           ],
           options: [
@@ -373,18 +390,16 @@ export default async function seedDemoData({ container }: ExecArgs) {
               sku: "PEN-GEL-MIX-001",
               allow_backorder: false,
               manage_inventory: true,
-              inventory_quantity: 200,
               prices: [{ currency_code: "cny", amount: 1890 }], // 18.90 CNY
-              options: [{ option: "颜色", value: "混色" }],
+              options: { 颜色: "混色" },
             },
             {
               title: "全黑",
               sku: "PEN-GEL-BLK-001",
               allow_backorder: false,
               manage_inventory: true,
-              inventory_quantity: 150,
               prices: [{ currency_code: "cny", amount: 1690 }], // 16.90 CNY
-              options: [{ option: "颜色", value: "全黑" }],
+              options: { 颜色: "全黑" },
             },
           ],
           weight: 100,
@@ -403,89 +418,69 @@ export default async function seedDemoData({ container }: ExecArgs) {
   // ─── Step 10: Create Inventory Items for stock management ───
   logger.info("Creating inventory items...");
 
-  // Create inventory items and link to variants
   const inventoryModuleService = container.resolve(Modules.INVENTORY);
-  const productModuleService = container.resolve(Modules.PRODUCT);
+  const query = container.resolve(ContainerRegistrationKeys.QUERY);
 
-  // Get all variants
-  const variants1 = await productModuleService.listProductVariants({
-    product_id: product1.id,
+  const { data: inventoryLinks } = await query.graph({
+    entity: "product_variant_inventory_item",
+    fields: ["variant.sku", "variant.title", "inventory_item_id"],
+    filters: {
+      variant_id: product1.variants.concat(product2.variants).map((variant) => variant.id),
+    },
   });
-  const variants2 = await productModuleService.listProductVariants({
-    product_id: product2.id,
-  });
-  const allVariants = [...variants1, ...variants2];
 
-  for (const variant of allVariants) {
-    const inventoryItem = await inventoryModuleService.createInventoryItems({
-      sku: variant.sku,
-      title: variant.title,
-      requires_shipping: true,
-      weight: variant.weight || 100,
-      origin_country: variant.origin_country || "cn",
-    });
+  for (const link of inventoryLinks) {
+    const variant = link.variant;
+    const inventoryItemId = link.inventory_item_id;
 
-    // Create inventory level
     await inventoryModuleService.createInventoryLevels({
-      inventory_item_id: inventoryItem.id,
+      inventory_item_id: inventoryItemId,
       location_id: stockLocation.id,
-      stocked_quantity: variant.inventory_quantity || 100,
+      stocked_quantity: stockQuantitiesBySku[variant.sku] || 100,
     });
 
-    // Link inventory item to variant
-    await remoteLink.create({
-      [Modules.PRODUCT]: {
-        variant_id: variant.id,
-      },
-      [Modules.INVENTORY]: {
-        inventory_item_id: inventoryItem.id,
-      },
-    });
-
-    logger.info(`  Inventory item linked: ${variant.sku} -> ${inventoryItem.id}`);
+    logger.info(`  Inventory level stocked: ${variant.sku} -> ${inventoryItemId}`);
   }
 
   // ─── Step 11: Create Pickup Points ───
   logger.info("Creating pickup points...");
-  const pickupModuleService = container.resolve("schoolPickup");
-  if (pickupModuleService) {
-    try {
-      await pickupModuleService.createPickupPoints([
-        {
-          name: "第一教学楼自提柜",
-          address: "第一教学楼A区大厅",
-          description: "位于一楼大厅左侧智能快递柜区域，支持24小时自助取件",
-          business_hours: "08:00-22:00",
-          contact_phone: "010-11111111",
-          is_enabled: true,
-          sort_order: 1,
-          metadata: { building: "教学楼A区", floor: "1F", location_type: "locker" },
-        },
-        {
-          name: "学生服务中心",
-          address: "学生活动中心201室",
-          description: "学生服务中心前台，请在工作时间前往领取",
-          business_hours: "09:00-17:30",
-          contact_phone: "010-22222222",
-          is_enabled: true,
-          sort_order: 2,
-          metadata: { building: "学生活动中心", floor: "2F", location_type: "counter" },
-        },
-        {
-          name: "南区宿舍驿站",
-          address: "南区宿舍区3号楼底商",
-          description: "南区宿舍区快递驿站，靠近3号宿舍楼，支持晚间取件",
-          business_hours: "09:00-21:00",
-          contact_phone: "010-33333333",
-          is_enabled: true,
-          sort_order: 3,
-          metadata: { building: "南区3号楼", floor: "1F", location_type: "station" },
-        },
-      ]);
-      logger.info("3 pickup points created");
-    } catch (e) {
-      logger.warn(`Pickup module not available yet: ${(e as Error).message}`);
-    }
+  try {
+    const pickupModuleService = container.resolve("schoolPickup");
+    await pickupModuleService.createPickupPoints([
+      {
+        name: "第一教学楼自提柜",
+        address: "第一教学楼A区大厅",
+        description: "位于一楼大厅左侧智能快递柜区域，支持24小时自助取件",
+        business_hours: "08:00-22:00",
+        contact_phone: "010-11111111",
+        is_enabled: true,
+        sort_order: 1,
+        metadata: { building: "教学楼A区", floor: "1F", location_type: "locker" },
+      },
+      {
+        name: "学生服务中心",
+        address: "学生活动中心201室",
+        description: "学生服务中心前台，请在工作时间前往领取",
+        business_hours: "09:00-17:30",
+        contact_phone: "010-22222222",
+        is_enabled: true,
+        sort_order: 2,
+        metadata: { building: "学生活动中心", floor: "2F", location_type: "counter" },
+      },
+      {
+        name: "南区宿舍驿站",
+        address: "南区宿舍区3号楼底商",
+        description: "南区宿舍区快递驿站，靠近3号宿舍楼，支持晚间取件",
+        business_hours: "09:00-21:00",
+        contact_phone: "010-33333333",
+        is_enabled: true,
+        sort_order: 3,
+        metadata: { building: "南区3号楼", floor: "1F", location_type: "station" },
+      },
+    ]);
+    logger.info("3 pickup points created");
+  } catch (e) {
+    logger.warn(`Pickup module not available yet: ${(e as Error).message}`);
   }
 
   // ─── Step 12: Update Store ───
@@ -544,8 +539,8 @@ export default async function seedDemoData({ container }: ExecArgs) {
     // Link API key to sales channel
     await linkSalesChannelsToApiKeyWorkflow(container).run({
       input: {
-        api_key: apiKey.id,
-        sales_channels: [{ id: salesChannel.id }],
+        id: apiKey.id,
+        add: [salesChannel.id],
       },
     });
 

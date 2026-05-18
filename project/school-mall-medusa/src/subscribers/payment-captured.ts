@@ -1,4 +1,4 @@
-import {
+import type {
   SubscriberArgs,
   SubscriberConfig,
 } from "@medusajs/framework";

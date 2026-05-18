@@ -9,6 +9,12 @@ module.exports = defineConfig({
   projectConfig: {
     // 数据库配置
     databaseUrl: process.env.DATABASE_URL,
+    databaseDriverOptions: {
+      pool: {
+        min: Number(process.env.DATABASE_POOL_MIN || 2),
+        max: Number(process.env.DATABASE_POOL_MAX || 20),
+      },
+    },
     redisUrl: process.env.REDIS_URL,
 
     // HTTP 服务配置

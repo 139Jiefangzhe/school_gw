@@ -5,6 +5,12 @@ loadEnv(process.env.NODE_ENV || "development", process.cwd());
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
+    databaseDriverOptions: {
+      pool: {
+        min: Number(process.env.DATABASE_POOL_MIN || 2),
+        max: Number(process.env.DATABASE_POOL_MAX || 20),
+      },
+    },
     redisUrl: process.env.REDIS_URL,
     http: {
       storeCors: process.env.STORE_CORS || "",
