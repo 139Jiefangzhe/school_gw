@@ -2,6 +2,12 @@ import { loadEnv, defineConfig, Modules } from "@medusajs/framework/utils";
 
 loadEnv(process.env.NODE_ENV || "development", process.cwd());
 
+const sessionCookieSameSite =
+  process.env.SESSION_COOKIE_SAME_SITE === "none" ||
+  process.env.SESSION_COOKIE_SAME_SITE === "strict"
+    ? process.env.SESSION_COOKIE_SAME_SITE
+    : "lax";
+
 module.exports = defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL,
@@ -12,6 +18,10 @@ module.exports = defineConfig({
       },
     },
     redisUrl: process.env.REDIS_URL,
+    cookieOptions: {
+      secure: process.env.SESSION_COOKIE_SECURE === "true",
+      sameSite: sessionCookieSameSite,
+    },
     http: {
       storeCors: process.env.STORE_CORS || "",
       adminCors: process.env.ADMIN_CORS || "",

@@ -505,7 +505,6 @@ export default async function seedDemoData({ container }: ExecArgs) {
     const authModuleService = container.resolve(Modules.AUTH);
     const userModuleService = container.resolve(Modules.USER);
 
-    // Register admin user with emailpass provider
     const authUser = await authModuleService.register("emailpass", {
       body: {
         email: DEFAULT_SCHOOL_ADMIN_EMAIL,
@@ -513,15 +512,32 @@ export default async function seedDemoData({ container }: ExecArgs) {
       },
     });
 
-    // Create the user entity
-    await userModuleService.createUsers({
-      id: authUser.authIdentity.entity_id,
-      email: DEFAULT_SCHOOL_ADMIN_EMAIL,
-      first_name: "School",
-      last_name: "Admin",
+    if (authUser.error || !authUser.authIdentity?.id) {
+      throw new Error(authUser.error || "Email/password registration failed");
+    }
+
+    const existingUsers = await userModuleService.listUsers(
+      { email: DEFAULT_SCHOOL_ADMIN_EMAIL },
+      { take: 1 }
+    );
+    const adminUser =
+      existingUsers[0] ||
+      (await userModuleService.createUsers({
+        email: DEFAULT_SCHOOL_ADMIN_EMAIL,
+        first_name: "School",
+        last_name: "Admin",
+      }));
+
+    // Medusa Admin resolves the logged-in actor from auth_identity.app_metadata.user_id.
+    await authModuleService.updateAuthIdentities({
+      id: authUser.authIdentity.id,
+      app_metadata: {
+        ...(authUser.authIdentity.app_metadata || {}),
+        user_id: adminUser.id,
+      },
     });
 
-    logger.info(`Admin user created: ${DEFAULT_SCHOOL_ADMIN_EMAIL}`);
+    logger.info(`Admin user ready: ${DEFAULT_SCHOOL_ADMIN_EMAIL}`);
   } catch (e) {
     logger.warn(`Admin user creation skipped: ${(e as Error).message}`);
   }

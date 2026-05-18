@@ -3,6 +3,12 @@ import { defineConfig, loadEnv, Modules } from "@medusajs/framework/utils";
 // 加载环境变量
 loadEnv(process.env.NODE_ENV || "development", process.cwd());
 
+const sessionCookieSameSite =
+  process.env.SESSION_COOKIE_SAME_SITE === "none" ||
+  process.env.SESSION_COOKIE_SAME_SITE === "strict"
+    ? process.env.SESSION_COOKIE_SAME_SITE
+    : "lax";
+
 // Medusa v2 项目配置
 module.exports = defineConfig({
   // 项目配置
@@ -16,6 +22,10 @@ module.exports = defineConfig({
       },
     },
     redisUrl: process.env.REDIS_URL,
+    cookieOptions: {
+      secure: process.env.SESSION_COOKIE_SECURE === "true",
+      sameSite: sessionCookieSameSite,
+    },
 
     // HTTP 服务配置
     http: {
