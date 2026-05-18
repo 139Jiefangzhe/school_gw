@@ -21,6 +21,7 @@ module.exports = defineConfig({
     },
   },
   admin: {
+    path: "/app",
     disable: process.env.DISABLE_MEDUSA_ADMIN === "true",
     backendUrl: process.env.MEDUSA_BACKEND_URL || "http://localhost:9000",
   },
